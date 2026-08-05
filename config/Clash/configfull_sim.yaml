@@ -56,7 +56,7 @@ external-ui-url: "https://ghfast.top/https://github.com/Zephyruso/zashboard/rele
 
 # 匹配进程 always/strict/off
 find-process-mode: off
-global-client-fingerprint: chrome
+#global-client-fingerprint: chrome
 keep-alive-idle: 600
 keep-alive-interval: 30
 
