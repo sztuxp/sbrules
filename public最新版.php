@@ -661,6 +661,19 @@ function doParseSourceInfo($urlLine = null, $parseAll = false) {
                         }
                     }
                     break;
+                case 'rpgp':
+                case 'replace_group':
+                    $replacePattern = trim($value);
+                    if (!empty($replacePattern)) {
+                        $jsonRules = json_decode($replacePattern, true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($jsonRules)) {
+                            $pipeline[] = [
+                                'type' => 'rpgp',
+                                'rules' => $jsonRules
+                            ];
+                        }
+                    }
+                    break;
 
                 case 'ft':
                 case 'filter':
@@ -992,7 +1005,7 @@ function doParseSourceInfo($urlLine = null, $parseAll = false) {
 
             // 按参数出现顺序依次执行 Pipeline
             foreach ($pipeline as $step) {
-                // 1. 执行 RP 替换
+                // 1. 执行 RP 替换（全局字段替换）
                 if ($step['type'] === 'rp') {
                     foreach ($step['rules'] as $search => $replace) {
                         $replace = str_replace("\\n", "\n", $replace);
@@ -1015,20 +1028,37 @@ function doParseSourceInfo($urlLine = null, $parseAll = false) {
                         }
                     }
                 }
-                // 2. 执行 FT 过滤
+                // 2. 执行 RPGP 替换（仅修改分组名）
+                elseif ($step['type'] === 'rpgp') {
+                    foreach ($step['rules'] as $search => $replace) {
+                        $replace = str_replace("\\n", "\n", $replace);
+
+                        if (strpos($search, 'regex:') === 0) {
+                            $pattern = substr($search, 6);
+                            if (@preg_match($pattern, '') !== false) {
+                                $chsGroupTitle = preg_replace($pattern, $replace, $chsGroupTitle);
+                                $groupTitle    = preg_replace($pattern, $replace, $groupTitle);
+                            }
+                        } else {
+                            $chsGroupTitle = str_replace($search, $replace, $chsGroupTitle);
+                            $groupTitle    = str_replace($search, $replace, $groupTitle);
+                        }
+                    }
+                }
+
+                // 3. 执行 FT 过滤
                 elseif ($step['type'] === 'ft') {
                     $list = $step['list'];
                     $isBlack = $step['is_black'];
 
-                    // 精确匹配比对闭包
-                    $exactMatch = function ($keyword) use ($chsChannelName, $channelName, $chsGroupTitle, $groupTitle, $streamUrl) {
+                    // 精确匹配比对闭包（使用引用传递，确保拿到 rpgp/rp 修改后的最新变量）
+                    $exactMatch = function ($keyword) use (&$chsChannelName, &$channelName, &$chsGroupTitle, &$groupTitle, &$streamUrl) {
                         return strcasecmp($chsChannelName, $keyword) === 0
                             || strcasecmp($channelName, $keyword) === 0
                             || strcasecmp($chsGroupTitle, $keyword) === 0
                             || strcasecmp($groupTitle, $keyword) === 0
                             || strcasecmp($streamUrl, $keyword) === 0;
                     };
-
                     $matched = !empty(array_filter($list, $exactMatch));
 
                     if ($isBlack && $matched) {
@@ -1046,11 +1076,15 @@ function doParseSourceInfo($urlLine = null, $parseAll = false) {
                 continue;
             }
 
-            // 【关键修复】：必须同步更新写回 $row 数组中！
+            // 【关键修复】：必须同步更新写回 $row 数组中，同时更新 $chsGroupTitles 索引数组！
             $row['channelName']    = $channelName;
             $row['chsChannelName'] = $chsChannelName;
             $row['groupTitle']     = $groupTitle;
+            $row['chsGroupTitle']  = $chsGroupTitle;
             $row['streamUrl']      = $streamUrl;
+            
+            // 同步更新全局/外部的简繁转换组名，防止后续逻辑读取旧组名
+            $chsGroupTitles[$index] = $chsGroupTitle;
 
             // ... 下面接原有的 ku9Opt 处理及 DB 关联逻辑 ...
             // 解析并生成 EXTKU9OPT
